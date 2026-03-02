@@ -139,31 +139,50 @@ def fetch_dex_batch(addresses):
         time.sleep(0.5)
     return result
 
-def fetch_dextools_belial():
-    """Fetch BELIAL data from DexTools (server-side works with right headers)."""
-    url = f"https://www.dextools.io/shared/data/pair?address={BELIAL_PAIR}&chain=base&audit=true&locks=false"
+def synthetic_sparkline(ps7d, ps24, ps6h):
+    """Build ~7 point synthetic sparkline from DexTools multi-period price stats."""
+    f7  = (ps7d.get("price") or {}).get("usd", {}).get("first") or 0
+    mx  = (ps7d.get("price") or {}).get("usd", {}).get("max")  or f7
+    f24 = (ps24.get("price") or {}).get("usd", {}).get("first") or f7
+    f6h = (ps6h.get("price") or {}).get("usd", {}).get("first") or f24
+    cur = (ps7d.get("price") or {}).get("usd", {}).get("last")  or f24
+    if not f7 or not cur:
+        return []
+    mid     = f7 + (mx - f7) * 0.6
+    pre_mid = f7 + (mid - f7) * 0.5
+    return [round(x, 16) for x in [f7, pre_mid, mid, (mid + f24) / 2, f24, f6h, cur]]
+
+
+def fetch_dextools(pair_address, audit=False):
+    """Fetch pair data from DexTools (server-side works with Referer header)."""
+    url = f"https://www.dextools.io/shared/data/pair?address={pair_address}&chain=base&audit={'true' if audit else 'false'}&locks=false"
     d = get_json(url, headers={
         "Sec-Fetch-Dest": "empty",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Site": "same-origin",
-        "Referer": f"https://www.dextools.io/app/base/pair-explorer/{BELIAL_PAIR}",
+        "Referer": f"https://www.dextools.io/app/base/pair-explorer/{pair_address}",
     })
     data = d["data"][0]
     m    = data.get("metrics", {})
     ps   = data.get("periodStats", {})
     ps24 = ps.get("24h", {})
+    ps6h = ps.get("6h", {})
     ps7d = ps.get("7d", {})
     return {
         "price_usd":        data.get("price"),
         "liquidity_usd":    m.get("liquidity"),
         "tx_count":         m.get("txCount"),
-        "reserve":          m.get("reserve"),          # token reserve in pool
+        "reserve":          m.get("reserve"),
         "volume_24h":       (ps24.get("volume") or {}).get("total"),
         "volume_7d":        (ps7d.get("volume") or {}).get("total"),
-        "price_change_24h": ps24.get("priceVariation"),
-        "buys_24h":         ps24.get("buys"),
-        "sells_24h":        ps24.get("sells"),
+        "price_change_24h": (ps24.get("price") or {}).get("usd", {}).get("diff"),
+        "sparkline":        synthetic_sparkline(ps7d, ps24, ps6h),
     }
+
+
+def fetch_dextools_belial():
+    """Fetch BELIAL data from DexTools."""
+    return fetch_dextools(BELIAL_PAIR, audit=True)
 
 def fetch_total_supply(token_address):
     """eth_call totalSupply() on Base."""
@@ -272,7 +291,7 @@ def main():
         if addr_lower == BELIAL_ADDR.lower():
             print("  Fetching BELIAL from DexTools...")
             try:
-                dt  = fetch_dextools_belial()
+                dt  = fetch_dextools(BELIAL_PAIR, audit=True)
                 # Get total supply for mcap
                 try:
                     supply = fetch_total_supply(t["address"])
@@ -294,7 +313,7 @@ def main():
                     "price":      dt.get("price_usd"),
                     "change_24h": dt.get("price_change_24h"),
                     "liquidity":  dt.get("liquidity_usd"),
-                    "sparkline":  [],
+                    "sparkline":  dt.get("sparkline", []),
                     "source":     "dextools",
                     "dex":        "flaunch",
                     "dex_url":    t.get("chart",""),
@@ -307,8 +326,18 @@ def main():
                 print(f"    DexTools BELIAL failed: {e}")
             continue
 
-        # Other manual tokens via DexScreener
+        # Other manual tokens via DexScreener + DexTools sparkline
         pair = manual_dex.get(addr_lower)
+        sparkline = []
+        if t.get("pairAddress"):
+            try:
+                dt = fetch_dextools(t["pairAddress"])
+                sparkline = dt.get("sparkline", [])
+                # If DexScreener has no price, use DexTools
+                if not (pair and pair.get("priceUsd")) and dt.get("price_usd"):
+                    print(f"    {t.get('symbol')}: using DexTools price ${dt['price_usd']:.2e}")
+            except Exception as e:
+                print(f"    DexTools sparkline for {t.get('symbol')}: {e}")
         agents.append({
             "id":         addr_lower,
             "name":       t.get("name", addr_lower[:8]),
@@ -320,7 +349,7 @@ def main():
             "price":      float(pair["priceUsd"]) if pair and pair.get("priceUsd") else None,
             "change_24h": pair["priceChange"]["h24"] if pair and pair.get("priceChange") else None,
             "liquidity":  pair["liquidity"]["usd"] if pair and pair.get("liquidity") else None,
-            "sparkline":  [],
+            "sparkline":  sparkline,
             "source":     "dex" if pair else "manual",
             "dex":        pair["dexId"] if pair else ("flaunch" if t.get("chart") else "lowliq"),
             "dex_url":    pair.get("url","") if pair else t.get("chart",""),

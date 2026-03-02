@@ -1,11 +1,12 @@
 {
-  "_comment": "Add any Base chain AI agent token. Only 'address' is required. pairAddress enables DexTools price fetch.",
+  "_comment": "Add any Base chain AI agent token. Only 'address' is required. pairAddress enables DexTools sparkline fetch.",
   "agents": [
     {
       "address": "0x0086cff0c1e5d17b19f5bcd4c8840a5b4251d959",
       "name": "ODEI AI",
       "symbol": "ODAI",
-      "image": "images/odai.jpg"
+      "image": "images/odai.jpg",
+      "pairAddress": "0xbf0f716999378af289863d0c7eb961793993a641a0a943ccc6bb45cb5713b3fb"
     },
     {
       "address": "0xfDC933Ff4e2980d18beCF48e4E030d8463A2Bb07",
@@ -13,7 +14,8 @@
       "symbol": "OWO",
       "website": "https://owockibot.xyz",
       "twitter": "https://x.com/owockibot",
-      "image": "images/owo.jpg"
+      "image": "images/owo.jpg",
+      "pairAddress": "0xff5ed6f1838fafd494701bd6040ebff07f264597fe2a54320da5b11c863fc3a5"
     },
     {
       "address": "0x423f8663687c2f81fcac6b3696a31e36b1560d41",
