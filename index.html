@@ -312,6 +312,7 @@ const DEX_LABELS = {
 };
 function dexTag(dex) {
   if (!dex) return '<span class="dex-tag dex-other" style="opacity:.4">—</span>';
+  if (dex === 'coingecko') return '<span class="dex-tag dex-cg">CoinGecko</span>';
   if (dex === 'lowliq') return '<span class="dex-tag dex-lowliq">Low Liq</span>';
   if (dex === 'flaunch') return '<span class="dex-tag" style="background:rgba(99,102,241,.12);color:#818cf8;border:1px solid rgba(99,102,241,.25)">Flaunch</span>';
   const d = dex.toLowerCase();
@@ -326,10 +327,10 @@ function dexTag(dex) {
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
 function cacheGet() {
-  try { const r=JSON.parse(localStorage.getItem('lb_v7')||'null'); return r&&Date.now()-r.ts<CACHE_TTL?r.data:null; } catch{return null;}
+  try { const r=JSON.parse(localStorage.getItem('lb_v8')||'null'); return r&&Date.now()-r.ts<CACHE_TTL?r.data:null; } catch{return null;}
 }
 function cacheSet(d) {
-  try{localStorage.setItem('lb_v7',JSON.stringify({ts:Date.now(),data:d}));}catch{}
+  try{localStorage.setItem('lb_v8',JSON.stringify({ts:Date.now(),data:d}));}catch{}
 }
 
 // ── Fetch pipeline ────────────────────────────────────────────────────────────
@@ -468,92 +469,57 @@ async function fetchFlaunchData(address) {
   return null;
 }
 
-// ── Main load ─────────────────────────────────────────────────────────────────
+// ── Main load — reads from pre-built agents-cache.json (no external API) ──────
 async function loadData() {
-  const cached = cacheGet();
-  if (cached) { renderAll(cached,true); enrichAndRefresh(cached); return; }
-  await fetchAndRender();
-}
-
-async function enrichAndRefresh(agents) {
-  // background: enrich DEX info then re-render quietly
-  try {
-    await enrichDex(agents);
-    cacheSet(agents);
-    renderTable();
-    updateDexStat();
-  } catch {}
-}
-
-async function fetchAndRender() {
   document.getElementById('loading').style.display='block';
   document.getElementById('lb-table').style.display='none';
   document.getElementById('error').style.display='none';
 
-  const agents = [];
-
-  // 1. CoinGecko pages 1+2
-  try {
-    const [p1, p2] = await Promise.allSettled([fetchCG(1), fetchCG(2)]);
-    const cgData = [...(p1.value||[]), ...(p2.value||[])];
-    for (const coin of cgData) {
-      const addr = BASE_ADDR[coin.id];
-      if (!addr) continue;
-      if (agents.find(a=>a.id===coin.id)) continue; // dedupe
-      const social = SOCIAL[coin.id]||{};
-      agents.push({
-        id:coin.id, name:coin.name, symbol:coin.symbol.toUpperCase(), address:addr,
-        image:coin.image, market_cap:coin.market_cap, total_volume:coin.total_volume,
-        current_price:coin.current_price, price_change_24h:coin.price_change_percentage_24h,
-        sparkline:coin.sparkline_in_7d?.price||[], source:'cg',
-        dex:null, dex_url:null,
-        website:social.website||'', twitter:social.twitter||'',
-      });
-    }
-  } catch(e){ console.warn('CoinGecko:', e.message); }
-
-  // 2. agents.json custom tokens — batch DexScreener
-  await loadAgentsJson();
-  const existing = new Set(agents.map(a=>a.address.toLowerCase()));
-  const newTokens = MANUAL.filter(t=>!existing.has(t.address.toLowerCase()));
-  if (newTokens.length) {
-    const addrs = newTokens.map(t=>t.address);
-    const pairMap = await fetchDexBatch(addrs);
-    for (const t of newTokens) {
-      const pair = pairMap[t.address.toLowerCase()] || null;
-      let extra = null;
-      if (!pair) { try { extra = await fetchFlaunchData(t.address); } catch {} }
-      // Use DexScreener image if no custom image provided
-      const autoImg = pair?.info?.imageUrl || null;
-      agents.push({
-        ...t,
-        image: t.image || autoImg,
-        sparkline: [],
-        market_cap: pair?.marketCap||pair?.fdv||extra?.market_cap||null,
-        total_volume: pair?.volume?.h24||extra?.volume||null,
-        current_price: pair ? parseFloat(pair.priceUsd)||null : extra?.price||null,
-        price_change_24h: pair?.priceChange?.h24||null,
-        source: pair ? 'dex' : (extra ? 'gecko' : 'flaunch'),
-        dex: pair ? pair.dexId : (t.chart ? 'flaunch' : 'lowliq'),
-        dex_url: pair?.url || t.chart || `https://dexscreener.com/base/${t.address}`,
-        website: t.website || pair?.info?.websites?.[0]?.url || '',
-        twitter: t.twitter || pair?.info?.socials?.find(s=>s.type==='twitter')?.url || '',
-      });
-    }
-  }
-
-  if (!agents.length) {
-    document.getElementById('loading').style.display='none';
-    document.getElementById('error').style.display='block';
-    document.getElementById('error').textContent='⚠️ Failed to load data. Please try refreshing.';
+  // Try local cache first (localStorage, 30 min TTL)
+  const lsCache = cacheGet();
+  if (lsCache) {
+    renderAll(lsCache, true);
     return;
   }
 
-  cacheSet(agents);
-  renderAll(agents, false);
+  // Load from agents-cache.json (built by GitHub Actions every 30 min)
+  try {
+    const t = Math.floor(Date.now() / (30*60*1000));
+    const r = await fetch(`agents-cache.json?t=${t}`, {signal:AbortSignal.timeout(15000)});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
 
-  // Enrich DEX info in background
-  enrichAndRefresh(agents);
+    const agents = (d.agents || []).map(a => ({
+      id:           a.id,
+      name:         a.name,
+      symbol:       (a.symbol||'').toUpperCase(),
+      address:      a.address,
+      image:        a.image,
+      _dex_image:   a._dex_image || null,
+      market_cap:   a.market_cap,
+      total_volume: a.volume_24h,
+      current_price:a.price,
+      price_change_24h: a.change_24h,
+      liquidity:    a.liquidity,
+      sparkline:    a.sparkline || [],
+      source:       a.source,
+      dex:          a.dex,
+      dex_url:      a.dex_url || a.chart || null,
+      website:      a.website || '',
+      twitter:      a.twitter || '',
+      chart:        a.chart || null,
+      _updated:     d.updated,
+    }));
+
+    if (!agents.length) throw new Error('Empty cache');
+    cacheSet(agents);
+    renderAll(agents, false);
+  } catch(e) {
+    console.error('Cache load failed:', e.message);
+    document.getElementById('loading').style.display='none';
+    document.getElementById('error').style.display='block';
+    document.getElementById('error').textContent='⚠️ Failed to load data. Please try refreshing. (' + e.message + ')';
+  }
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -561,6 +527,14 @@ function renderAll(agents, fromCache) {
   allAgents = agents;
   document.getElementById('loading').style.display='none';
   document.getElementById('lb-table').style.display='';
+  // Show last updated time
+  const ts = agents.find(a=>a._updated)?._updated;
+  const updEl = document.getElementById('last-updated');
+  if (updEl && ts) {
+    const d = new Date(ts);
+    updEl.textContent = 'Updated ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) + ' UTC';
+    updEl.title = d.toISOString();
+  }
   const totalMcap = agents.reduce((s,a)=>s+(a.market_cap||0),0);
   const totalVol  = agents.reduce((s,a)=>s+(a.total_volume||0),0);
   const gainers   = agents.filter(a=>(a.price_change_24h||0)>0).length;
