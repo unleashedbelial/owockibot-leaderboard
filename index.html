@@ -224,12 +224,24 @@ const BASE_ADDR = {
   'ribbita-by-virtuals':'0xa4a2e2ca3fbfe21aed83471d28b6f65a233c6e00',
 };
 
-// Manual tokens: ODAI, OWO, BELIAL + new ones
-const MANUAL = [
-  {id:'odei-ai',    name:'ODEI AI',   symbol:'ODAI',   address:'0x0086cff0c1e5d17b19f5bcd4c8840a5b4251d959', website:'',                           twitter:'',  image:'https://cdn.dexscreener.com/cms/images/0oNtwO7s8BpsBZxI?width=200&height=200&quality=90'},
-  {id:'owockibot',  name:'Owockibot', symbol:'OWO',    address:'0xfDC933Ff4e2980d18beCF48e4E030d8463A2Bb07', website:'https://owockibot.xyz',       twitter:'https://x.com/owockibot', image:'https://cdn.dexscreener.com/cms/images/8e0c56ffaebc0a2c035e5de523e5992a1c5eb1c54dc273476e640389a432c203?width=200&height=200&quality=90'},
-  {id:'belial-ai',  name:'Belial',    symbol:'BELIAL', address:'0x423f8663687c2f81fcac6b3696a31e36b1560d41', website:'https://belial.lol',          twitter:'https://x.com/unleashedBelial', flaunch:'https://flaunch.gg/base/coin/0x423f8663687c2f81fcac6b3696a31e36b1560d41', image:'belial-avatar.svg'},
-];
+// Manual tokens loaded from agents.json at runtime
+let MANUAL = [];
+async function loadAgentsJson() {
+  try {
+    const r = await fetch('agents.json?v='+Date.now(), {signal:AbortSignal.timeout(5000)});
+    const d = await r.json();
+    MANUAL = (d.agents||[]).map(a => ({
+      id: a.address.toLowerCase(),
+      name: a.name||a.address.slice(0,8)+'...',
+      symbol: a.symbol||'???',
+      address: a.address,
+      website: a.website||'',
+      twitter: a.twitter||'',
+      image: a.image||null,
+      chart: a.chart||null,
+    }));
+  } catch(e) { console.warn('agents.json load failed:', e.message); }
+}
 
 const SOCIAL = {
   'virtual-protocol':{website:'https://virtuals.io',   twitter:'https://x.com/virtuals_io'},
@@ -302,10 +314,10 @@ function dexTag(dex) {
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
 function cacheGet() {
-  try { const r=JSON.parse(localStorage.getItem('lb_v3')||'null'); return r&&Date.now()-r.ts<CACHE_TTL?r.data:null; } catch{return null;}
+  try { const r=JSON.parse(localStorage.getItem('lb_v4')||'null'); return r&&Date.now()-r.ts<CACHE_TTL?r.data:null; } catch{return null;}
 }
 function cacheSet(d) {
-  try{localStorage.setItem('lb_v3',JSON.stringify({ts:Date.now(),data:d}));}catch{}
+  try{localStorage.setItem('lb_v4',JSON.stringify({ts:Date.now(),data:d}));}catch{}
 }
 
 // ── Fetch pipeline ────────────────────────────────────────────────────────────
@@ -323,6 +335,26 @@ async function fetchDexPair(address) {
   const d = await safeJson(`https://api.dexscreener.com/latest/dex/tokens/${address}`);
   const pairs = (d.pairs||[]).filter(p=>p.chainId==='base');
   return pairs.sort((a,b)=>(b.liquidity?.usd||0)-(a.liquidity?.usd||0))[0]||null;
+}
+
+// DexScreener batch: fetch up to 30 tokens at once, return map address→pair
+async function fetchDexBatch(addresses) {
+  const result = {};
+  const chunks = [];
+  for (let i=0;i<addresses.length;i+=28) chunks.push(addresses.slice(i,i+28));
+  for (const chunk of chunks) {
+    try {
+      const d = await safeJson(`https://api.dexscreener.com/latest/dex/tokens/${chunk.join(',')}`);
+      for (const p of (d.pairs||[]).filter(q=>q.chainId==='base')) {
+        const addr = p.baseToken.address.toLowerCase();
+        if (!result[addr] || (p.liquidity?.usd||0) > (result[addr].liquidity?.usd||0)) {
+          result[addr] = p;
+        }
+      }
+    } catch(e){ console.warn('DexScreener batch chunk failed:', e.message); }
+    if (chunks.length > 1) await new Promise(r=>setTimeout(r,300));
+  }
+  return result;
 }
 
 // Batch DexScreener to enrich DEX info for CoinGecko tokens
@@ -416,25 +448,35 @@ async function fetchAndRender() {
     }
   } catch(e){ console.warn('CoinGecko:', e.message); }
 
-  // 2. Manual tokens via DexScreener
+  // 2. agents.json custom tokens — batch DexScreener
+  await loadAgentsJson();
   const existing = new Set(agents.map(a=>a.address.toLowerCase()));
-  await Promise.allSettled(MANUAL.map(async t => {
-    if (existing.has(t.address.toLowerCase())) return;
-    let pair = null, extra = null;
-    try { pair = await fetchDexPair(t.address); } catch {}
-    // If no DexScreener pair, try Flaunch/GeckoTerminal (for BELIAL etc)
-    if (!pair) { try { extra = await fetchFlaunchData(t.address); } catch {} }
-    agents.push({
-      ...t, image:t.image||null, sparkline:[],
-      market_cap: pair?.marketCap||pair?.fdv||extra?.market_cap||null,
-      total_volume: pair?.volume?.h24||extra?.volume||null,
-      current_price: pair?parseFloat(pair.priceUsd)||null : extra?.price||null,
-      price_change_24h: pair?.priceChange?.h24||null,
-      source: pair?'dex':(extra?'gecko':'flaunch'),
-      dex: pair?pair.dexId:(t.flaunch?'flaunch':'lowliq'),
-      dex_url: pair?.url||(t.flaunch)||`https://dexscreener.com/base/${t.address}`,
-    });
-  }));
+  const newTokens = MANUAL.filter(t=>!existing.has(t.address.toLowerCase()));
+  if (newTokens.length) {
+    const addrs = newTokens.map(t=>t.address);
+    const pairMap = await fetchDexBatch(addrs);
+    for (const t of newTokens) {
+      const pair = pairMap[t.address.toLowerCase()] || null;
+      let extra = null;
+      if (!pair) { try { extra = await fetchFlaunchData(t.address); } catch {} }
+      // Use DexScreener image if no custom image provided
+      const autoImg = pair?.info?.imageUrl || null;
+      agents.push({
+        ...t,
+        image: t.image || autoImg,
+        sparkline: [],
+        market_cap: pair?.marketCap||pair?.fdv||extra?.market_cap||null,
+        total_volume: pair?.volume?.h24||extra?.volume||null,
+        current_price: pair ? parseFloat(pair.priceUsd)||null : extra?.price||null,
+        price_change_24h: pair?.priceChange?.h24||null,
+        source: pair ? 'dex' : (extra ? 'gecko' : 'flaunch'),
+        dex: pair ? pair.dexId : (t.chart ? 'flaunch' : 'lowliq'),
+        dex_url: pair?.url || t.chart || `https://dexscreener.com/base/${t.address}`,
+        website: t.website || pair?.info?.websites?.[0]?.url || '',
+        twitter: t.twitter || pair?.info?.socials?.find(s=>s.type==='twitter')?.url || '',
+      });
+    }
+  }
 
   if (!agents.length) {
     document.getElementById('loading').style.display='none';

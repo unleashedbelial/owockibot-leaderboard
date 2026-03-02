@@ -1,0 +1,26 @@
+{
+  "_comment": "Add any Base chain AI agent token here. Only 'address' is required. Optional fields override fetched data.",
+  "agents": [
+    {
+      "address": "0x0086cff0c1e5d17b19f5bcd4c8840a5b4251d959",
+      "name": "ODEI AI",
+      "symbol": "ODAI"
+    },
+    {
+      "address": "0xfDC933Ff4e2980d18beCF48e4E030d8463A2Bb07",
+      "name": "Owockibot",
+      "symbol": "OWO",
+      "website": "https://owockibot.xyz",
+      "twitter": "https://x.com/owockibot"
+    },
+    {
+      "address": "0x423f8663687c2f81fcac6b3696a31e36b1560d41",
+      "name": "Belial",
+      "symbol": "BELIAL",
+      "website": "https://belial.lol",
+      "twitter": "https://x.com/unleashedBelial",
+      "image": "belial-avatar.svg",
+      "chart": "https://flaunch.gg/base/coin/0x423f8663687c2f81fcac6b3696a31e36b1560d41"
+    }
+  ]
+}
