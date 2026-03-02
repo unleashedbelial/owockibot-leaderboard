@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🤖 Agent Economy Leaderboard — Base Chain</title>
+<style>
+  :root {
+    --bg: #050810;
+    --bg2: #0b0f1e;
+    --bg3: #111829;
+    --border: #1e2d4a;
+    --accent: #3b82f6;
+    --accent2: #6366f1;
+    --green: #10b981;
+    --red: #ef4444;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --gold: #f59e0b;
+    --silver: #94a3b8;
+    --bronze: #cd7c2f;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
+
+  /* Header */
+  header { background: linear-gradient(135deg, #0b0f1e 0%, #1a1040 100%); border-bottom: 1px solid var(--border); padding: 24px 32px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+  .header-left h1 { font-size: 1.6rem; font-weight: 700; background: linear-gradient(135deg, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .header-left p { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
+  .header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .live-badge { display: flex; align-items: center; gap: 6px; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); border-radius: 20px; padding: 6px 14px; font-size: 0.8rem; color: var(--green); }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.4} }
+  #last-update { color: var(--muted); font-size: 0.78rem; }
+
+  /* Stats bar */
+  .stats-bar { display: flex; gap: 0; border-bottom: 1px solid var(--border); overflow-x: auto; }
+  .stat { padding: 14px 28px; border-right: 1px solid var(--border); white-space: nowrap; }
+  .stat-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .stat-val { font-size: 1.1rem; font-weight: 600; margin-top: 2px; }
+
+  /* Controls */
+  .controls { padding: 16px 32px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--border); background: var(--bg2); }
+  .search-wrap { position: relative; flex: 1; min-width: 200px; max-width: 320px; }
+  .search-wrap input { width: 100%; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px 8px 36px; color: var(--text); font-size: 0.88rem; outline: none; transition: border-color .2s; }
+  .search-wrap input:focus { border-color: var(--accent); }
+  .search-wrap svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+  .sort-btns { display: flex; gap: 6px; }
+  .sort-btn { background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; padding: 7px 14px; font-size: 0.82rem; color: var(--muted); cursor: pointer; transition: all .15s; white-space: nowrap; }
+  .sort-btn:hover { border-color: var(--accent); color: var(--text); }
+  .sort-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .chain-badge { background: rgba(59,130,246,.12); border: 1px solid rgba(59,130,246,.3); border-radius: 6px; padding: 7px 14px; font-size: 0.82rem; color: var(--accent); }
+
+  /* Table */
+  .table-wrap { overflow-x: auto; padding: 0 16px 24px; }
+  table { width: 100%; border-collapse: collapse; min-width: 820px; }
+  thead th { padding: 12px 16px; text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); border-bottom: 1px solid var(--border); cursor: pointer; white-space: nowrap; user-select: none; }
+  thead th:hover { color: var(--text); }
+  thead th.sorted { color: var(--accent); }
+  thead th.sorted::after { content: ' ↓'; }
+  thead th.sorted.asc::after { content: ' ↑'; }
+  tbody tr { border-bottom: 1px solid rgba(30,45,74,.5); transition: background .15s; cursor: default; }
+  tbody tr:hover { background: rgba(255,255,255,.025); }
+  td { padding: 13px 16px; vertical-align: middle; font-size: 0.88rem; }
+
+  /* Rank */
+  .rank { font-weight: 700; font-size: 0.95rem; width: 36px; text-align: center; }
+  .rank-1 { color: var(--gold); }
+  .rank-2 { color: var(--silver); }
+  .rank-3 { color: var(--bronze); }
+
+  /* Agent info */
+  .agent-cell { display: flex; align-items: center; gap: 10px; }
+  .agent-logo { width: 32px; height: 32px; border-radius: 50%; background: var(--bg3); object-fit: cover; flex-shrink: 0; }
+  .agent-logo-fallback { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; color: #fff; flex-shrink: 0; }
+  .agent-name { font-weight: 600; font-size: 0.92rem; }
+  .agent-symbol { font-size: 0.75rem; color: var(--muted); margin-top: 1px; }
+  .agent-links { display: flex; gap: 5px; margin-top: 3px; }
+  .agent-link { color: var(--muted); text-decoration: none; font-size: 0.7rem; padding: 1px 5px; border: 1px solid var(--border); border-radius: 3px; transition: all .15s; }
+  .agent-link:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* Price */
+  .price { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .change { font-weight: 500; font-size: 0.85rem; }
+  .up { color: var(--green); }
+  .down { color: var(--red); }
+  .neutral { color: var(--muted); }
+  .vol { color: var(--text); }
+  .mcap { font-weight: 600; }
+
+  /* Sparkline */
+  .sparkline { width: 80px; height: 32px; }
+
+  /* Source badge */
+  .source-badge { font-size: 0.65rem; padding: 2px 6px; border-radius: 3px; }
+  .source-cg { background: rgba(252,211,77,.1); color: #fcd34d; border: 1px solid rgba(252,211,77,.2); }
+  .source-dex { background: rgba(59,130,246,.1); color: #60a5fa; border: 1px solid rgba(59,130,246,.2); }
+
+  /* Loading/error */
+  .loading { text-align: center; padding: 80px 32px; color: var(--muted); }
+  .loading-spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 16px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error-msg { text-align: center; padding: 60px 32px; color: var(--red); }
+
+  /* Footer */
+  footer { padding: 20px 32px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+  footer a { color: var(--muted); text-decoration: none; font-size: 0.78rem; }
+  footer a:hover { color: var(--text); }
+  .footer-sources { display: flex; gap: 12px; }
+
+  @media (max-width: 640px) {
+    header, .controls, footer { padding-left: 16px; padding-right: 16px; }
+    .stat { padding: 12px 16px; }
+    .agent-links { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <h1>🤖 Agent Economy Leaderboard</h1>
+    <p>AI agent tokens on Base chain — ranked by market cap</p>
+  </div>
+  <div class="header-right">
+    <div class="live-badge"><div class="live-dot"></div> Live</div>
+    <span id="last-update">Loading…</span>
+  </div>
+</header>
+
+<div class="stats-bar" id="stats-bar">
+  <div class="stat"><div class="stat-label">Agents Tracked</div><div class="stat-val" id="stat-count">—</div></div>
+  <div class="stat"><div class="stat-label">Total Market Cap</div><div class="stat-val" id="stat-mcap">—</div></div>
+  <div class="stat"><div class="stat-label">24h Volume</div><div class="stat-val" id="stat-vol">—</div></div>
+  <div class="stat"><div class="stat-label">Gainers / Losers</div><div class="stat-val" id="stat-gl">—</div></div>
+</div>
+
+<div class="controls">
+  <div class="search-wrap">
+    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input type="text" id="search" placeholder="Search agent or ticker…" oninput="filterTable()">
+  </div>
+  <div class="sort-btns">
+    <button class="sort-btn active" onclick="sortBy('market_cap', this)">Market Cap</button>
+    <button class="sort-btn" onclick="sortBy('total_volume', this)">Volume</button>
+    <button class="sort-btn" onclick="sortBy('price_change_24h', this)">24h %</button>
+  </div>
+  <div class="chain-badge">⛓ Base Chain</div>
+</div>
+
+<div class="table-wrap">
+  <div class="loading" id="loading">
+    <div class="loading-spinner"></div>
+    <div>Fetching agent data…</div>
+  </div>
+  <div class="error-msg" id="error" style="display:none"></div>
+  <table id="leaderboard-table" style="display:none">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Agent</th>
+        <th class="sorted" onclick="sortBy('market_cap', this)">Market Cap ↓</th>
+        <th onclick="sortBy('current_price', this)">Price</th>
+        <th onclick="sortBy('price_change_24h', this)">24h %</th>
+        <th onclick="sortBy('total_volume', this)">Volume 24h</th>
+        <th>7d Chart</th>
+        <th>Source</th>
+      </tr>
+    </thead>
+    <tbody id="leaderboard-body"></tbody>
+  </table>
+</div>
+
+<footer>
+  <div class="footer-sources">
+    <a href="https://www.coingecko.com" target="_blank">CoinGecko API</a>
+    <a href="https://dexscreener.com" target="_blank">DexScreener API</a>
+    <a href="https://base.org" target="_blank">Base Chain</a>
+  </div>
+  <a href="https://moltbook.com/u/Belial" target="_blank">Built by @unleashedBelial for owockibot.xyz</a>
+</footer>
+
+<script>
+// ── Token address map (Base chain) ───────────────────────────────────────────
+// CoinGecko ID → Base contract address
+const BASE_ADDRESS_MAP = {
+  'virtual-protocol':                            '0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b',
+  'venice-token':                                '0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf',
+  'origintrail':                                 '0xa81a52b4dda010896cdd386c7fbdc5cdc835ba23',
+  'stp-network':                                 '0x1b4617734c43f6159f3a70b7e06d883647512778',
+  'bankercoin-2':                                '0x22af33fe49fd1fa80c7149773dde5890d3c76f3b',
+  'iotex':                                       '0xbcbaf311cec8a4eac0430193a528d9ff27ae38c1',
+  'freysa-ai':                                   '0xb33ff54b9f7242ef1593d2c9bcd8f9df46c77935',
+  'aixbt':                                       '0x4f9fd6be4a90f2620860d680c0d4d5fb53d1a825',
+  'magic':                                       '0xf1572d1da5c3cce14ee5a1c9327d17e9ff0e3f43',
+  'elsa':                                        '0x29cc30f9d113b356ce408667aa6433589cecbdca',
+  'giza':                                        '0x590830dfdf9a3f68afcdde2694773debdf267774',
+  'paal-ai':                                     '0xd52333441c0553facb259600fa833a69186893a5',
+  'alethea-artificial-liquid-intelligence-token': '0x97c806e7665d3afd84a8fe1837921403d59f3dcc',
+  'cookie':                                      '0xc0041ef357b183448b235a8ea73ce4e4ec8c265f',
+  'game-by-virtuals':                            '0x1c4cca7c5db003824208adda61bd749e55f463a3',
+  'recall':                                      '0x1f16e03c1a5908818f47f6ee7bb16690b40d0671',
+  'cortex-2':                                    '0x000000000000012def132e61759048be5b5c6033',
+  'wayfinder':                                   '0x30c7235866872213f68cb1f08c37cb9eccb93452',
+  'solidus-aitech':                              '0xd71552d9e08e5351adb52163b3bbbc4d7de53ce1',
+  'elizaos':                                     '0xea17df5cf6d172224892b5477a16acb111182478',
+  'morpheusai':                                  '0x7431ada8a591c955a994a21710752ef9b882b8e3',
+  'openserv':                                    '0x5576d6ed9181f2225aff5282ac0ed29f755437ea',
+  'autonolas':                                   '0x54330d28ca3357f294334bdc454a032e7f353416',
+  'foom':                                        '0x02300ac24838570012027e0a90d3feccef3c51d2',
+  'mia-2':                                       '0x7cea5b9548a4b48cf9551813ef9e73de916e41e0',
+  'kellyclaude':                                 '0x50d2280441372486beecdd328c1854743ebacb07',
+  'heyanon':                                     '0x79bbf4508b1391af3a0f4b30bb5fc4aa9ab0e07c',
+  'torus':                                       '0x78ec15c5fd8efc5e924e9eebb9e549e29c785867',
+  'mamo':                                        '0x7300b37dfdfab110d83290a29dfb31b1740219fe',
+  'reppo':                                       '0xff8104251e7761163fac3211ef5583fb3f8583d6',
+  'clawd-atg-eth':                               '0x9f86db9fc6f7c9408e8fda3ff8ce4e78ac7a6b07',
+  'theoriq':                                     '0x0b2558bdbc7ffec0f327fb3579c23dabd1699706',
+  'genius-ai':                                   '0x614577036f0a024dbc1c88ba616b394dd65d105a',
+  'agent-zero-token':                            '0xcc4adb618253ed0d4d8a188fb901d70c54735e03',
+  'felix-3':                                     '0xf30bf00edd0c22db54c9274b90d2a4c21fc09b07',
+  'empyreal':                                    '0x39d5313c3750140e5042887413ba8aa6145a9bd2',
+  'spectral':                                    '0x96419929d7949d6a801a6909c145c8eef6a40431',
+  'botto':                                       '0x24914cb6bd01e6a0cf2a9c0478e33c25926e6a0c',
+  'permission-coin':                             '0xbb146326778227a8498b105a18f84e0987a684b4',
+  'strawberry-ai':                               '0xdf36186772a8fda4be100dbacc0b48ef00c53089',
+  '1000x-by-virtuals':                           '0x352b850b733ab8bab50aed1dab5d22e3186ce984',
+  'araistotle':                                  '0xfac77f01957ed1b3dd1cbea992199b8f85b6e886',
+  'draiftking':                                  '0x7ce02e86354ea0cc3b302aeadc0ab56bc7eb44b8',
+  'wasabot':                                     '0xc2427bf51d99b6ed0da0da103bc51235638ee868',
+  'molten-3':                                    '0x59c0d5c34c301ac0600147924d6c9be22a2f0b07',
+  'vaderai-by-virtuals':                         '0x731814e491571a2e9ee3c5b1f7f3b962ee8f4870',
+  'moltbook':                                    '0xb695559b26bb2c9703ef1935c37aeae9526bab07',
+  'aubrai-by-bio':                               '0x9d56c29e820dd13b0580b185d0e0dc301d27581d',
+  'santa-by-virtuals':                           '0x815269d17c10f0f3df7249370e0c1b9efe781aa8',
+  'vpay':                                        '0x98ac5b33a4ef1151f138941c979211599c2ff953',
+};
+
+// Manual tokens not in CoinGecko ai-agents category
+const MANUAL_TOKENS = [
+  { id: 'odei-ai',    name: 'ODEI AI',    symbol: 'ODAI',   address: '0x0086cff0c1e5d17b19f5bcd4c8840a5b4251d959', website: '', twitter: '' },
+  { id: 'owockibot',  name: 'Owockibot',  symbol: 'OWO',    address: '0xfDC933Ff4e2980d18beCF48e4E030d8463A2Bb07', website: 'https://owockibot.xyz', twitter: 'https://x.com/owockibot' },
+  { id: 'belial-ai',  name: 'Belial',     symbol: 'BELIAL', address: '0x423f8663687c2f81fcac6b3696a31e36b1560d41', website: 'https://belial.lol', twitter: 'https://x.com/unleashedBelial' },
+];
+
+// Social links for known agents
+const SOCIAL = {
+  'virtual-protocol': { website: 'https://virtuals.io', twitter: 'https://x.com/virtuals_io' },
+  'aixbt':            { website: 'https://aixbt.com', twitter: 'https://x.com/aixbt_agent' },
+  'kellyclaude':      { twitter: 'https://x.com/KellyClaudeAI' },
+  'game-by-virtuals': { website: 'https://vvaifu.fun', twitter: 'https://x.com/gamefivirtuals' },
+  'elizaos':          { website: 'https://elizaos.ai', twitter: 'https://x.com/elizaos' },
+  'autonolas':        { website: 'https://olas.network', twitter: 'https://x.com/autonolas' },
+  'recallnet':        { website: 'https://recall.network', twitter: 'https://x.com/recallnet' },
+};
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let allAgents = [];
+let sortField  = 'market_cap';
+let sortAsc    = false;
+let filterQ    = '';
+const CACHE_KEY = 'leaderboard_v1';
+const CACHE_TTL = 5 * 60 * 1000;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fmt(n, decimals = 2) {
+  if (n == null || isNaN(n)) return '—';
+  if (n >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return '$' + (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return '$' + (n / 1e3).toFixed(1) + 'K';
+  return '$' + n.toFixed(decimals);
+}
+function fmtPrice(p) {
+  if (p == null) return '—';
+  if (p >= 1)     return '$' + p.toFixed(3);
+  if (p >= 0.01)  return '$' + p.toFixed(4);
+  if (p >= 0.001) return '$' + p.toFixed(5);
+  return '$' + p.toExponential(2);
+}
+function fmtPct(v) {
+  if (v == null || isNaN(v)) return '<span class="neutral">—</span>';
+  const cls = v > 0 ? 'up' : v < 0 ? 'down' : 'neutral';
+  return `<span class="${cls}">${v > 0 ? '▲' : '▼'} ${Math.abs(v).toFixed(2)}%</span>`;
+}
+function sparklineSVG(prices) {
+  if (!prices || prices.length < 2) return '<span style="color:var(--muted);font-size:.7rem">—</span>';
+  const pts = prices.slice(-32);
+  const mn = Math.min(...pts), mx = Math.max(...pts);
+  const range = mx - mn || 1;
+  const W = 80, H = 32, pad = 2;
+  const xs = pts.map((_, i) => pad + (i / (pts.length - 1)) * (W - pad * 2));
+  const ys = pts.map(v => H - pad - ((v - mn) / range) * (H - pad * 2));
+  const d  = xs.map((x, i) => (i === 0 ? `M${x},${ys[i]}` : `L${x},${ys[i]}`)).join(' ');
+  const last = pts[pts.length - 1], first = pts[0];
+  const color = last >= first ? '#10b981' : '#ef4444';
+  return `<svg class="sparkline" viewBox="0 0 ${W} ${H}"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
+// ── Cache ─────────────────────────────────────────────────────────────────────
+function cacheGet() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw);
+    if (Date.now() - ts > CACHE_TTL) return null;
+    return data;
+  } catch { return null; }
+}
+function cacheSet(data) {
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data })); } catch {}
+}
+
+// ── Fetch ─────────────────────────────────────────────────────────────────────
+async function fetchCoinGecko() {
+  const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&category=ai-agents&order=market_cap_desc&per_page=100&page=1&sparkline=true&price_change_percentage=24h';
+  const r = await fetch(url, { signal: AbortSignal.timeout(12000) });
+  if (!r.ok) throw new Error('CoinGecko ' + r.status);
+  return r.json();
+}
+
+async function fetchDexScreener(address) {
+  const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`, { signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error('DexScreener ' + r.status);
+  const d = await r.json();
+  return (d.pairs || []).filter(p => p.chainId === 'base').sort((a,b) => (b.liquidity?.usd||0) - (a.liquidity?.usd||0))[0];
+}
+
+// ── Build agents array ────────────────────────────────────────────────────────
+async function loadData() {
+  // Check cache first
+  const cached = cacheGet();
+  if (cached) {
+    renderAll(cached, true);
+    refreshInBackground();
+    return;
+  }
+  await fetchAndRender();
+}
+
+async function fetchAndRender() {
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('leaderboard-table').style.display = 'none';
+  document.getElementById('error').style.display = 'none';
+
+  const agents = [];
+
+  // 1. CoinGecko ai-agents category
+  try {
+    const cgData = await fetchCoinGecko();
+    for (const coin of cgData) {
+      const addr = BASE_ADDRESS_MAP[coin.id];
+      if (!addr) continue;
+      const social = SOCIAL[coin.id] || {};
+      agents.push({
+        id: coin.id,
+        name: coin.name,
+        symbol: coin.symbol.toUpperCase(),
+        address: addr,
+        image: coin.image,
+        market_cap: coin.market_cap,
+        total_volume: coin.total_volume,
+        current_price: coin.current_price,
+        price_change_24h: coin.price_change_percentage_24h,
+        sparkline: coin.sparkline_in_7d?.price || [],
+        source: 'cg',
+        website: social.website || '',
+        twitter: social.twitter || '',
+      });
+    }
+  } catch(e) { console.warn('CoinGecko failed:', e.message); }
+
+  // 2. Manual tokens via DexScreener
+  const existing = new Set(agents.map(a => a.address.toLowerCase()));
+  await Promise.allSettled(MANUAL_TOKENS.map(async t => {
+    if (existing.has(t.address.toLowerCase())) return;
+    try {
+      const pair = await fetchDexScreener(t.address);
+      if (!pair) return;
+      agents.push({
+        ...t,
+        image: null,
+        market_cap: pair.marketCap || pair.fdv || null,
+        total_volume: pair.volume?.h24 || null,
+        current_price: parseFloat(pair.priceUsd) || null,
+        price_change_24h: pair.priceChange?.h24 || null,
+        sparkline: [],
+        source: 'dex',
+        dex_url: pair.url,
+      });
+    } catch(e) { console.warn(`DexScreener ${t.symbol} failed:`, e.message); }
+  }));
+
+  if (!agents.length) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('error').style.display = 'block';
+    document.getElementById('error').textContent = '⚠️ Failed to load data. Please try refreshing.';
+    return;
+  }
+
+  cacheSet(agents);
+  renderAll(agents, false);
+}
+
+async function refreshInBackground() {
+  try {
+    const fresh = await fetchCoinGecko();
+    const agents = cacheGet() || allAgents;
+    // Update CoinGecko entries
+    for (const coin of fresh) {
+      const idx = agents.findIndex(a => a.id === coin.id);
+      if (idx < 0) continue;
+      agents[idx].market_cap     = coin.market_cap;
+      agents[idx].total_volume   = coin.total_volume;
+      agents[idx].current_price  = coin.current_price;
+      agents[idx].price_change_24h = coin.price_change_percentage_24h;
+      agents[idx].sparkline      = coin.sparkline_in_7d?.price || agents[idx].sparkline;
+    }
+    cacheSet(agents);
+    renderAll(agents, false);
+  } catch {}
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function renderAll(agents, fromCache) {
+  allAgents = agents;
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('leaderboard-table').style.display = '';
+
+  // Stats bar
+  const totalMcap = agents.reduce((s,a) => s + (a.market_cap || 0), 0);
+  const totalVol  = agents.reduce((s,a) => s + (a.total_volume || 0), 0);
+  const gainers   = agents.filter(a => (a.price_change_24h || 0) > 0).length;
+  const losers    = agents.filter(a => (a.price_change_24h || 0) < 0).length;
+  document.getElementById('stat-count').textContent = agents.length;
+  document.getElementById('stat-mcap').textContent  = fmt(totalMcap);
+  document.getElementById('stat-vol').textContent   = fmt(totalVol);
+  document.getElementById('stat-gl').innerHTML = `<span class="up">${gainers}▲</span> / <span class="down">${losers}▼</span>`;
+
+  document.getElementById('last-update').textContent = (fromCache ? '⚡ Cache · ' : '✓ Live · ') + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  renderTable();
+}
+
+function renderTable() {
+  let list = [...allAgents];
+
+  // Filter
+  if (filterQ) {
+    const q = filterQ.toLowerCase();
+    list = list.filter(a => a.name.toLowerCase().includes(q) || a.symbol.toLowerCase().includes(q));
+  }
+
+  // Sort
+  list.sort((a, b) => {
+    const av = a[sortField] ?? (sortAsc ? Infinity : -Infinity);
+    const bv = b[sortField] ?? (sortAsc ? Infinity : -Infinity);
+    return sortAsc ? av - bv : bv - av;
+  });
+
+  const tbody = document.getElementById('leaderboard-body');
+  tbody.innerHTML = list.map((a, i) => {
+    const rank = i + 1;
+    const rankClass = rank === 1 ? 'rank-1' : rank === 2 ? 'rank-2' : rank === 3 ? 'rank-3' : '';
+    const logo = a.image
+      ? `<img class="agent-logo" src="${a.image}" alt="${a.symbol}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+      : '';
+    const fallback = `<div class="agent-logo-fallback" ${a.image ? 'style="display:none"' : ''}>${a.symbol.slice(0,2)}</div>`;
+    const links = [];
+    if (a.website) links.push(`<a class="agent-link" href="${a.website}" target="_blank">web</a>`);
+    if (a.twitter) links.push(`<a class="agent-link" href="${a.twitter}" target="_blank">𝕏</a>`);
+    const dexLink = `https://dexscreener.com/base/${a.address}`;
+    links.push(`<a class="agent-link" href="${a.dex_url || dexLink}" target="_blank">chart</a>`);
+    const srcBadge = a.source === 'cg'
+      ? `<span class="source-badge source-cg">CoinGecko</span>`
+      : `<span class="source-badge source-dex">DexScreener</span>`;
+    return `<tr>
+      <td><span class="rank ${rankClass}">${rank}</span></td>
+      <td><div class="agent-cell">
+        ${logo}${fallback}
+        <div>
+          <div class="agent-name">${a.name}</div>
+          <div class="agent-symbol">$${a.symbol}</div>
+          <div class="agent-links">${links.join('')}</div>
+        </div>
+      </div></td>
+      <td class="mcap">${fmt(a.market_cap)}</td>
+      <td class="price">${fmtPrice(a.current_price)}</td>
+      <td>${fmtPct(a.price_change_24h)}</td>
+      <td class="vol">${fmt(a.total_volume)}</td>
+      <td>${sparklineSVG(a.sparkline)}</td>
+      <td>${srcBadge}</td>
+    </tr>`;
+  }).join('');
+}
+
+function sortBy(field, btn) {
+  if (sortField === field) { sortAsc = !sortAsc; }
+  else { sortField = field; sortAsc = false; }
+  document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderTable();
+}
+
+function filterTable() {
+  filterQ = document.getElementById('search').value;
+  renderTable();
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadData();
+setInterval(fetchAndRender, 5 * 60 * 1000); // refresh every 5 min
+</script>
+</body>
+</html>
