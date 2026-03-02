@@ -326,10 +326,10 @@ function dexTag(dex) {
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
 function cacheGet() {
-  try { const r=JSON.parse(localStorage.getItem('lb_v5')||'null'); return r&&Date.now()-r.ts<CACHE_TTL?r.data:null; } catch{return null;}
+  try { const r=JSON.parse(localStorage.getItem('lb_v6')||'null'); return r&&Date.now()-r.ts<CACHE_TTL?r.data:null; } catch{return null;}
 }
 function cacheSet(d) {
-  try{localStorage.setItem('lb_v5',JSON.stringify({ts:Date.now(),data:d}));}catch{}
+  try{localStorage.setItem('lb_v6',JSON.stringify({ts:Date.now(),data:d}));}catch{}
 }
 
 // ── Fetch pipeline ────────────────────────────────────────────────────────────
@@ -371,47 +371,85 @@ async function fetchDexBatch(addresses) {
 
 // Batch DexScreener to enrich DEX info for CoinGecko tokens
 async function enrichDex(agents) {
-  // DexScreener supports comma-separated addresses (up to 30)
+  const needEnrich = agents.filter(a=>a.source==='cg'&&a.address&&!a.dex);
   const chunks = [];
-  const addrs = agents.filter(a=>a.source==='cg'&&a.address&&!a.dex).map(a=>a.address);
-  for (let i=0;i<addrs.length;i+=25) chunks.push(addrs.slice(i,i+25));
+  for (let i=0;i<needEnrich.length;i+=25) chunks.push(needEnrich.slice(i,i+25));
   for (const chunk of chunks) {
     try {
-      const d = await safeJson(`https://api.dexscreener.com/latest/dex/tokens/${chunk.join(',')}`);
-      for (const pair of (d.pairs||[]).filter(p=>p.chainId==='base')) {
-        const addr = pair.baseToken.address.toLowerCase();
-        const ag = agents.find(a=>a.address&&a.address.toLowerCase()===addr);
-        if (ag && !ag.dex) {
-          ag.dex = pair.dexId;
-          ag.dex_url = pair.url;
+      const addrs = chunk.map(a=>a.address);
+      const d = await safeJson(`https://api.dexscreener.com/latest/dex/tokens/${addrs.join(',')}`);
+      const pairMap = {};
+      for (const p of (d.pairs||[]).filter(q=>q.chainId==='base')) {
+        const addr = p.baseToken.address.toLowerCase();
+        if (!pairMap[addr] || (p.liquidity?.usd||0) > (pairMap[addr].liquidity?.usd||0)) {
+          pairMap[addr] = p;
         }
       }
-    } catch {}
-    await new Promise(r=>setTimeout(r,300));
+      for (const ag of chunk) {
+        const p = pairMap[ag.address.toLowerCase()];
+        if (p) {
+          ag.dex = p.dexId;
+          ag.dex_url = p.url;
+          if (!ag.image && p.info?.imageUrl) ag.image = p.info.imageUrl.split('?')[0];
+        }
+      }
+    } catch(e) {
+      // Fallback: retry individually for failed chunks
+      for (const ag of chunk) {
+        if (ag.dex) continue;
+        try {
+          const d2 = await safeJson(`https://api.dexscreener.com/latest/dex/tokens/${ag.address}`);
+          const pairs = (d2.pairs||[]).filter(p=>p.chainId==='base').sort((a,b)=>(b.liquidity?.usd||0)-(a.liquidity?.usd||0));
+          if (pairs[0]) {
+            ag.dex = pairs[0].dexId;
+            ag.dex_url = pairs[0].url;
+            if (!ag.image && pairs[0].info?.imageUrl) ag.image = pairs[0].info.imageUrl.split('?')[0];
+          }
+          await new Promise(r=>setTimeout(r,150));
+        } catch {}
+      }
+    }
+    await new Promise(r=>setTimeout(r,400));
   }
   return agents;
 }
 
-// ── Flaunch price fetch (Base RPC — read Uniswap v4 slot0) ──────────────────
-async function fetchFlaunchData(address) {
-  // Try DefiLlama first
+// ── DexTools fetch (CORS=*, Uniswap v4 / Flaunch pairs) ─────────────────────
+async function fetchDexTools(pairAddress) {
+  const url = `https://www.dextools.io/shared/data/pair?address=${pairAddress}&chain=base&audit=false&locks=false`;
+  const r = await fetch(url, {signal:AbortSignal.timeout(10000)});
+  if (!r.ok) throw new Error('DexTools ' + r.status);
+  const d = await r.json();
+  const data = d.data?.[0];
+  if (!data) return null;
+  const m = data.metrics || {};
+  const ps24 = data.periodStats?.['24h'] || {};
+  return {
+    price:      parseFloat(data.price) || null,
+    market_cap: null, // DexTools doesn't return mcap directly
+    liquidity:  m.liquidity || null,
+    volume:     ps24.volume?.total || null,
+    txCount:    m.txCount || null,
+    dex:        'flaunch',
+    source:     'dextools',
+  };
+}
+
+// ── Fallback price fetch for tokens without DexScreener pairs ─────────────────
+async function fetchFlaunchData(address, pairAddress) {
+  // Try DexTools if pair address provided
+  if (pairAddress) {
+    try {
+      const d = await fetchDexTools(pairAddress);
+      if (d && d.price) return d;
+    } catch {}
+  }
+  // Try DefiLlama
   try {
     const r = await fetch(`https://coins.llama.fi/prices/current/base:${address}`,{signal:AbortSignal.timeout(5000)});
     const d = await r.json();
     const coin = d.coins[`base:${address.toLowerCase()}`]||d.coins[`base:${address}`];
-    if (coin && coin.price) return {price: coin.price, source:'DefiLlama'};
-  } catch {}
-  // Try GeckoTerminal
-  try {
-    const r = await fetch(`https://api.geckoterminal.com/api/v2/networks/base/tokens/${address}`,{signal:AbortSignal.timeout(6000)});
-    const d = await r.json();
-    const attrs = d.data?.attributes;
-    if (attrs?.price_usd) return {
-      price: parseFloat(attrs.price_usd),
-      market_cap: parseFloat(attrs.market_cap_usd)||null,
-      volume: parseFloat(attrs.volume_usd?.h24)||null,
-      source:'GeckoTerminal',
-    };
+    if (coin?.price) return {price: coin.price, source:'DefiLlama'};
   } catch {}
   return null;
 }
@@ -470,7 +508,7 @@ async function fetchAndRender() {
     for (const t of newTokens) {
       const pair = pairMap[t.address.toLowerCase()] || null;
       let extra = null;
-      if (!pair) { try { extra = await fetchFlaunchData(t.address); } catch {} }
+      if (!pair) { try { extra = await fetchFlaunchData(t.address, t.pairAddress||null); } catch {} }
       // Use DexScreener image if no custom image provided
       const autoImg = pair?.info?.imageUrl || null;
       agents.push({
