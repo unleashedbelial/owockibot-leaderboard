@@ -302,10 +302,10 @@ function dexTag(dex) {
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
 function cacheGet() {
-  try { const r=JSON.parse(localStorage.getItem('lb_v2')||'null'); return r&&Date.now()-r.ts<CACHE_TTL?r.data:null; } catch{return null;}
+  try { const r=JSON.parse(localStorage.getItem('lb_v3')||'null'); return r&&Date.now()-r.ts<CACHE_TTL?r.data:null; } catch{return null;}
 }
 function cacheSet(d) {
-  try{localStorage.setItem('lb_v2',JSON.stringify({ts:Date.now(),data:d}));}catch{}
+  try{localStorage.setItem('lb_v3',JSON.stringify({ts:Date.now(),data:d}));}catch{}
 }
 
 // ── Fetch pipeline ────────────────────────────────────────────────────────────
