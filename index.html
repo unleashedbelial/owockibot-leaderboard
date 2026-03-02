@@ -326,10 +326,10 @@ function dexTag(dex) {
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
 function cacheGet() {
-  try { const r=JSON.parse(localStorage.getItem('lb_v6')||'null'); return r&&Date.now()-r.ts<CACHE_TTL?r.data:null; } catch{return null;}
+  try { const r=JSON.parse(localStorage.getItem('lb_v7')||'null'); return r&&Date.now()-r.ts<CACHE_TTL?r.data:null; } catch{return null;}
 }
 function cacheSet(d) {
-  try{localStorage.setItem('lb_v6',JSON.stringify({ts:Date.now(),data:d}));}catch{}
+  try{localStorage.setItem('lb_v7',JSON.stringify({ts:Date.now(),data:d}));}catch{}
 }
 
 // ── Fetch pipeline ────────────────────────────────────────────────────────────
@@ -436,12 +436,26 @@ async function fetchDexTools(pairAddress) {
 }
 
 // ── Fallback price fetch for tokens without DexScreener pairs ─────────────────
-async function fetchFlaunchData(address, pairAddress) {
-  // Try DexTools if pair address provided
-  if (pairAddress) {
+// Reads from pre-fetched JSON files (updated hourly by GitHub Actions)
+const LOCAL_DATA_MAP = {
+  '0x423f8663687c2f81fcac6b3696a31e36b1560d41': 'belial-data.json',
+};
+
+async function fetchFlaunchData(address) {
+  // Try local pre-fetched JSON (no CORS issues)
+  const localFile = LOCAL_DATA_MAP[address.toLowerCase()];
+  if (localFile) {
     try {
-      const d = await fetchDexTools(pairAddress);
-      if (d && d.price) return d;
+      const r = await fetch(localFile + '?t=' + Math.floor(Date.now()/3600000), {signal:AbortSignal.timeout(5000)});
+      const d = await r.json();
+      if (d.price_usd) return {
+        price:      d.price_usd,
+        market_cap: null,
+        liquidity:  d.liquidity_usd,
+        volume:     d.volume_24h,
+        dex:        d.dex || 'flaunch',
+        source:     'local',
+      };
     } catch {}
   }
   // Try DefiLlama
@@ -508,7 +522,7 @@ async function fetchAndRender() {
     for (const t of newTokens) {
       const pair = pairMap[t.address.toLowerCase()] || null;
       let extra = null;
-      if (!pair) { try { extra = await fetchFlaunchData(t.address, t.pairAddress||null); } catch {} }
+      if (!pair) { try { extra = await fetchFlaunchData(t.address); } catch {} }
       // Use DexScreener image if no custom image provided
       const autoImg = pair?.info?.imageUrl || null;
       agents.push({
