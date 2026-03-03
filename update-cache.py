@@ -262,8 +262,36 @@ def main():
             if pair.get("info", {}).get("imageUrl"):
                 ag["_dex_image"] = pair["info"]["imageUrl"].split("?")[0]
         else:
-            ag["dex"] = "coingecko"   # No Base pair found → mark source
+            ag["dex"] = "coingecko"   # tentative — individual lookup below
         agents.append(ag)
+
+    # ── 2b. Individual DexScreener lookup for 'coingecko' tokens ──────────
+    # Batch misses some pairs; per-token endpoint is more reliable
+    print("  Individual DexScreener fallback for coingecko tokens...")
+    for ag in agents:
+        if ag.get("dex") != "coingecko":
+            continue
+        try:
+            d = get_json(f"https://api.dexscreener.com/latest/dex/tokens/{ag['address']}")
+            base_pairs = [p for p in (d.get("pairs") or []) if p.get("chainId") == "base"]
+            if not base_pairs:
+                # Accept any chain if no Base pair
+                base_pairs = sorted(d.get("pairs") or [], key=lambda p: (p.get("liquidity") or {}).get("usd") or 0, reverse=True)
+            if base_pairs:
+                pair = max(base_pairs, key=lambda p: (p.get("liquidity") or {}).get("usd") or 0)
+                ag["dex"]     = pair.get("dexId")
+                ag["dex_url"] = pair.get("url")
+                ds_price = float(pair.get("priceUsd") or 0)
+                ds_mcap  = pair.get("marketCap") or pair.get("fdv")
+                if ds_price and not ag.get("price"):
+                    ag["price"]      = ds_price
+                    ag["market_cap"] = ds_mcap
+                if pair.get("info", {}).get("imageUrl"):
+                    ag["_dex_image"] = pair["info"]["imageUrl"].split("?")[0]
+                print(f"    {ag['symbol']}: found {ag['dex']} pair")
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"    {ag['symbol']} individual lookup failed: {e}")
 
     # ── 3. Manual tokens from agents.json ───────────────────────────────────
     print("  Loading agents.json manual tokens...")
